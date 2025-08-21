@@ -1,11 +1,17 @@
-{{- /* ==== user-configurable defaults ==== */ -}}
-{{- $format    := or .format "cpio" -}}        # one of: cpio, tar, ext4
-{{- $outdir    := or .outdir "out" -}}         # subdir under --artifactdir
-{{- $cpioname  := or .cpioname "rootfs.cpio" -}}
-{{- $tarname   := or .tarname "rootfs.tar.gz" -}}
-{{- $cpioname_gz  := or .cpioname_gz "rootfs.cpio.gz" -}}
-{{- $imgname   := or .imgname "rootfs.img" -}}
-{{- $imgsize   := or .imgsize "1024MB" -}}     # for ext4 image
+{{- $format          := or .format "ext4" -}}            
+{{- $outdir          := or .outdir "images" -}}
+{{- $cpioname        := or .cpioname "rootfs.cpio" -}}
+{{- $cpioname_gz     := or .cpioname_gz "rootfs.cpio.gz" -}}
+{{- $tarname         := or .tarname "rootfs.tar.gz" -}}
+{{- $imgname         := or .imgname "rootfs.img" -}}
+{{- $imgsize         := or .imgsize "500MB" -}}
+{{- $py_enable       := or .py_enable "1" -}}             
+{{- $py_prune_tests  := or .py_prune_tests "1" -}}
+{{- $py_compile_pyc  := or .py_compile_pyc "1" -}}
+{{- $py_drop_sources := or .py_drop_sources "0" -}}      
+{{- $reqs_file       := or .reqs_file "requirements.txt" -}}
+{{- $artifactdir := or .artifactdir "/tmp/artifacts" -}}
+
 
 architecture: arm64
 
@@ -13,77 +19,132 @@ actions:
   - action: mmdebstrap
     description: Minimal Debian for arm64
     suite: bookworm
-    components:
-          - main
+    components: [main]
     mirror: https://deb.debian.org/debian
-  #  variant: minbase
 
   - action: apt
     description: Install systemd
-    packages:
-      - systemd
-      - systemd-sysv
-      - udev
+    packages: [systemd, systemd-sysv, udev]
 
   - action: apt
     description: Add a few basics
-    packages:
-      - bash
-      - ca-certificates
-      - sudo
+    packages: [ca-certificates, sudo]
+
+  - action: apt
+    description: Small runtime libs often used by scientific wheels
+    packages: [libgfortran5, libstdc++6, ca-certificates]
 
   - action: run
     description: Enable serial autologin
     chroot: true
     script: ./setup-user.sh
 
+  {{- if eq $py_enable "1" }}
+  - action: apt
+    description: Install Python runtime + temporary pip
+    packages: [python3, python3-pip]
+
+  - action: run
+    description: Stage requirements file into ROOTDIR
+    command: |
+      set -e
+      echo "ROOTDIR=${ROOTDIR}"
+      test -d "${ROOTDIR}" || { echo "ROOTDIR missing!"; exit 1; }
+      install -d "${ROOTDIR}/root"
+      if [ -f "{{ $reqs_file }}" ]; then
+        install -m 0644 "{{ $reqs_file }}" "${ROOTDIR}/root/py-reqs.txt"
+        echo "Using requirements from {{ $reqs_file }}"
+      else
+        echo "No {{ $reqs_file }}; creating empty list."
+        : > "${ROOTDIR}/root/py-reqs.txt"
+      fi
+      ls -l "${ROOTDIR}/root/py-reqs.txt"
+
+  - action: run
+    description: Install Python packages system-wide
+    chroot: true
+    environment: { PIP_BREAK_SYSTEM_PACKAGES: "1" }
+    command: |
+      set -e
+      test -f /root/py-reqs.txt || { echo "Missing /root/py-reqs.txt"; ls -l /root; exit 1; }
+      python3 -m pip install --break-system-packages --upgrade pip
+      python3 -m pip install --break-system-packages -r /root/py-reqs.txt
+
+  {{- if eq $py_compile_pyc "1" }}
+  - action: run
+    description: Precompile .pyc bytecode
+    chroot: true
+    command: |
+      python3 -m compileall -q -j 0 /usr/local/lib/python* /usr/lib/python* || true
+  {{- end }}
+
+  {{- if eq $py_prune_tests "1" }}
+  - action: run
+    description: Prune tests and __pycache__
+    chroot: true
+    command: |
+      find /usr/local/lib/python* -type d -name 'tests' -prune -exec rm -rf {} + 2>/dev/null || true
+      find /usr/local/lib/python* -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
+  {{- end }}
+
+  {{- if eq $py_drop_sources "1" }}
+  - action: run
+    description: Drop .py sources (keeps .pyc)
+    chroot: true
+    command: |
+      find /usr/local/lib/python* -type f -name '*.py' -delete 2>/dev/null || true
+
+  - action: run
+    description: Remove pip and clean caches
+    chroot: true
+    command: |
+      set -e
+      apt-get purge -y python3-pip || true
+      apt-get autoremove -y --purge || true
+      rm -rf /root/.cache/pip /var/cache/apt/archives/* /var/lib/apt/lists/*
+  {{- end }}
+  {{- end }}
+
   {{- if eq $format "ext4" }}
-  # --- Build an EXT4 disk image and deploy the rootfs into it ---
   - action: image-partition
     description: Create an ext4 disk image
-    imagename: {{ $outdir }}/{{ $imgname }}   # path is relative to --artifactdir
+    imagename: {{ $imgname }}            # filename only; Debos stores it in --artifactdir
     imagesize: {{ $imgsize }}
     partitiontype: gpt
-    mountpoints:
-      - mountpoint: /
-        partition: root
+    mountpoints: [{ mountpoint: "/", partition: root }]
     partitions:
-      - name: root
-        fs: ext4
-        start: 0%
-        end: 100%
+      - { name: root, fs: ext4, start: 0%, end: 100% }
 
   - action: filesystem-deploy
     description: Copy rootfs into the image
 
+  # (optional) just to show where it landed
+  - action: run
+    description: Show image in artifact dir
+    command: |
+      ls -lh "${ARTIFACTDIR}/{{ $imgname }}"
+
   {{- else if eq $format "cpio" }}
-  # --- Build an uncompressed initramfs-style CPIO from the rootfs ---
   - action: run
     description: Build uncompressed CPIO archive
-    # host context (not chroot); uses ROOTDIR and ARTIFACTDIR
     command: |
       set -e
-      install -d "${ARTIFACTDIR}/{{ $outdir }}"
       cd "${ROOTDIR}"
-      find . -print0 \
-        | cpio --null -ov --format=newc > "${ARTIFACTDIR}/{{ $outdir }}/{{ $cpioname }}"
+      install -d "${ARTIFACTDIR}"
+      find . -print0 | cpio --null -ov --format=newc > "${ARTIFACTDIR}/{{ $cpioname }}"
+
   {{- else if eq $format "cpio.gz" }}
-  # --- Build a gzip-compressed CPIO from the rootfs ---
   - action: run
-    description: Build gzip-compressed CPIO archive and show path
+    description: Build gzip-compressed CPIO archive
     command: |
       set -e
-      install -d "${ARTIFACTDIR}/{{ $outdir }}"
       cd "${ROOTDIR}"
-      find . -print0 \
-        | cpio --null -ov --format=newc \
-        | gzip -9 > "${ARTIFACTDIR}/{{ $outdir }}/{{ $cpioname_gz }}"
-      echo "CPIO.GZ: ${ARTIFACTDIR}/{{ $outdir }}/{{ $cpioname_gz }}"
-      ls -l "${ARTIFACTDIR}/{{ $outdir }}/{{ $cpioname_gz }}" 
+      install -d "${ARTIFACTDIR}"
+      find . -print0 | cpio --null -ov --format=newc | gzip -9 > "${ARTIFACTDIR}/{{ $cpioname_gz }}"
+
   {{- else }}
-  # --- Default: produce a tar.gz of the rootfs ---
   - action: pack
     description: Create rootfs tarball
-    file: {{ $outdir }}/{{ $tarname }}        # relative to --artifactdir
+    file: {{ $tarname }} 
     compression: gz
   {{- end }}
