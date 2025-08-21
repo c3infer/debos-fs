@@ -1,0 +1,89 @@
+{{- /* ==== user-configurable defaults ==== */ -}}
+{{- $format    := or .format "cpio" -}}        # one of: cpio, tar, ext4
+{{- $outdir    := or .outdir "out" -}}         # subdir under --artifactdir
+{{- $cpioname  := or .cpioname "rootfs.cpio" -}}
+{{- $tarname   := or .tarname "rootfs.tar.gz" -}}
+{{- $cpioname_gz  := or .cpioname_gz "rootfs.cpio.gz" -}}
+{{- $imgname   := or .imgname "rootfs.img" -}}
+{{- $imgsize   := or .imgsize "1024MB" -}}     # for ext4 image
+
+architecture: arm64
+
+actions:
+  - action: mmdebstrap
+    description: Minimal Debian for arm64
+    suite: bookworm
+    components:
+          - main
+    mirror: https://deb.debian.org/debian
+  #  variant: minbase
+
+  - action: apt
+    description: Install systemd
+    packages:
+      - systemd
+      - systemd-sysv
+      - udev
+
+  - action: apt
+    description: Add a few basics
+    packages:
+      - bash
+      - ca-certificates
+      - sudo
+
+  - action: run
+    description: Enable serial autologin
+    chroot: true
+    script: ./setup-user.sh
+
+  {{- if eq $format "ext4" }}
+  # --- Build an EXT4 disk image and deploy the rootfs into it ---
+  - action: image-partition
+    description: Create an ext4 disk image
+    imagename: {{ $outdir }}/{{ $imgname }}   # path is relative to --artifactdir
+    imagesize: {{ $imgsize }}
+    partitiontype: gpt
+    mountpoints:
+      - mountpoint: /
+        partition: root
+    partitions:
+      - name: root
+        fs: ext4
+        start: 0%
+        end: 100%
+
+  - action: filesystem-deploy
+    description: Copy rootfs into the image
+
+  {{- else if eq $format "cpio" }}
+  # --- Build an uncompressed initramfs-style CPIO from the rootfs ---
+  - action: run
+    description: Build uncompressed CPIO archive
+    # host context (not chroot); uses ROOTDIR and ARTIFACTDIR
+    command: |
+      set -e
+      install -d "${ARTIFACTDIR}/{{ $outdir }}"
+      cd "${ROOTDIR}"
+      find . -print0 \
+        | cpio --null -ov --format=newc > "${ARTIFACTDIR}/{{ $outdir }}/{{ $cpioname }}"
+  {{- else if eq $format "cpio.gz" }}
+  # --- Build a gzip-compressed CPIO from the rootfs ---
+  - action: run
+    description: Build gzip-compressed CPIO archive and show path
+    command: |
+      set -e
+      install -d "${ARTIFACTDIR}/{{ $outdir }}"
+      cd "${ROOTDIR}"
+      find . -print0 \
+        | cpio --null -ov --format=newc \
+        | gzip -9 > "${ARTIFACTDIR}/{{ $outdir }}/{{ $cpioname_gz }}"
+      echo "CPIO.GZ: ${ARTIFACTDIR}/{{ $outdir }}/{{ $cpioname_gz }}"
+      ls -l "${ARTIFACTDIR}/{{ $outdir }}/{{ $cpioname_gz }}" 
+  {{- else }}
+  # --- Default: produce a tar.gz of the rootfs ---
+  - action: pack
+    description: Create rootfs tarball
+    file: {{ $outdir }}/{{ $tarname }}        # relative to --artifactdir
+    compression: gz
+  {{- end }}
