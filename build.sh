@@ -37,6 +37,8 @@ PY_DROP_SOURCES="${PY_DROP_SOURCES:-0}"
 DEBOS_VERBOSE=0
 DRY_RUN=0
 
+OVERLAY="${OVERLAY:-$DIR/overlay}"
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [options]
@@ -47,6 +49,8 @@ General:
   --format FMT              cpio|cpio.gz|ext4|tar  (default: $FORMAT)
   --verbose                 pass -v to debos
   --dry-run                 print the command and exit
+  --overlay DIR             overlay directory to merge into the rootfs (default: $OVERLAY)
+                            (only in-tree addresses work. give relative path)
 
 Console & user:
   --console TTY             (default: $CONSOLE)
@@ -58,7 +62,8 @@ Python:
   --py-enable 0|1           (default: $PY_ENABLE)
   --py-mode MODE            system|venv (default: $PY_MODE)
   --py-venv-path PATH       (default: $PY_VENV_PATH)
-  --reqs-file PATH          passed as reqs_file to your script
+  --reqs-file PATH          passed as reqs_file to your script  (default: $reqs_file)
+                            (only in-tree addresses work. give relative path)
 
 Format-specific:
   --imgname NAME            (ext4)   (default: $IMGNAME)
@@ -78,7 +83,7 @@ Examples:
   $(basename "$0") --format cpio.gz --py-enable 0
 
   # ext4 image, Python enabled from requirements.txt
-  $(basename "$0") --format ext4 --py-enable 1 --reqs-file Absolute address to requirements.txt
+  $(basename "$0") --format ext4 --py-enable 1 --reqs-file Absolute_address_to_requirements.txt
 
 EOF
 }
@@ -105,6 +110,7 @@ while [[ $# -gt 0 ]]; do
     --cpioname) CPIONAME="$2"; shift 2;;
     --cpioname-gz) CPIONAME_GZ="$2"; shift 2;;
     --tarname) TARNAME="$2"; shift 2;;
+    --overlay) OVERLAY="$2"; shift 2;;
 
     --keep-locales) KEEP_LOCALES="$2"; shift 2;;
     --py-prune-tests) PY_PRUNE_TESTS="$2"; shift 2;;
@@ -115,10 +121,12 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=1; shift;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown option: $1"; usage; exit 2;;
-  esac
+  esac  
 done
 
 mkdir -p "$ARTIFACTDIR"
+mkdir -p out
+mkdir -p overlay
 
 # --- Validate format ---
 case "$FORMAT" in
@@ -145,7 +153,12 @@ CMD="$CMD -t keep_locales:$KEEP_LOCALES -t py_prune_tests:$PY_PRUNE_TESTS -t py_
 
 # Env vars for your helper script(s)
 CMD="$CMD -e CONSOLE:$CONSOLE -e USERNAME:$USERNAME -e PASSWORD:$PASSWORD -e SUDO_NOPASS:$SUDO_NOPASS"
+CMD="$CMD -t username:$USERNAME"
 [[ -n "${reqs_file}" ]] && CMD="$CMD -t reqs_file:$reqs_file"
+
+if [[ -d "$OVERLAY" ]]; then
+  CMD="$CMD -t overlay_dir:$OVERLAY"
+fi
 
 # Recipe
 CMD="$CMD $RECIPE"
@@ -155,6 +168,6 @@ if [[ $DRY_RUN -eq 1 ]]; then
   exit 0
 fi
 
-mkdir -p out
+
 # Run it
 eval "$CMD"

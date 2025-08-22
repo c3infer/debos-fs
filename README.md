@@ -6,6 +6,11 @@ First you need to install a docker container with arm64 emulation enabled
 
 
  
+To see full range of options:
+```
+./build.sh -h
+```
+
 Minimal cpio.gz, no Python:
 ```
 ./build.sh --format cpio.gz --py-enable 0

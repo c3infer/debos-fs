@@ -2,7 +2,7 @@
 set -eu
 
 # ---- configurable via Debos -e VAR:VALUE (or defaults here) ----
-USERNAME="${USERNAME:-user}"          # user to autologin
+USERNAME="${USERNAME:-netsys}"          # user to autologin
 PASSWORD="${PASSWORD:-}"              # if empty: no password set
 CONSOLE="${CONSOLE:-ttyAMA0}"         # e.g. ttyAMA0 (aarch64 virt) or ttyS0
 SUDO_NOPASS="${SUDO_NOPASS:-1}"       # 1 = passwordless sudo for %sudo

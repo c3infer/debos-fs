@@ -11,6 +11,8 @@
 {{- $py_drop_sources := or .py_drop_sources "0" -}}      
 {{- $reqs_file       := or .reqs_file "requirements.txt" -}}
 {{- $artifactdir := or .artifactdir "/tmp/artifacts" -}}
+{{- $overlay_dir := or .overlay_dir "" -}}
+{{- $username := or .username "" -}}
 
 
 architecture: arm64
@@ -104,6 +106,25 @@ actions:
       rm -rf /root/.cache/pip /var/cache/apt/archives/* /var/lib/apt/lists/*
   {{- end }}
   {{- end }}
+
+  - action: run
+    chroot: true
+    description: Disable binfmt units (not needed on target)
+    command: |
+      set -e
+      systemctl --no-reload --no-ask-password mask \
+      systemd-binfmt.service \
+      proc-sys-fs-binfmt_misc.mount \
+      proc-sys-fs-binfmt_misc.automount || true
+
+
+  {{- if $overlay_dir }}
+  - action: overlay
+    description: Overlay files into the target rootfs
+    source: {{ $overlay_dir }}
+    destination: /home/{{ $username }}/
+  {{- end }}
+       
 
   {{- if eq $format "ext4" }}
   - action: image-partition
