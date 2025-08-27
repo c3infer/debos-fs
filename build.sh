@@ -18,13 +18,16 @@ CONSOLE="${CONSOLE:-ttyS0}"
 USERNAME="${USERNAME:-netsys}"
 PASSWORD="${PASSWORD:-netsys}"
 SUDO_NOPASS="${SUDO_NOPASS:-1}"
+HOSTNAME="${HOSTNAME:-vm}"            # removes 'fakemachine' prompt
+LOGIN_AS="${LOGIN_AS:-root}"          # root | user
+OVERLAY_DEST="${OVERLAY_DEST:-/root}"     # where to place overlay inside the image
 
 # Python (lean by default; no venv)
 PY_ENABLE="${PY_ENABLE:-0}"           # 0 = off (smallest), 1 = install
 PY_MODE="${PY_MODE:-system}"          # system | venv
 PY_VENV_PATH="${PY_VENV_PATH:-/opt/venvs/default}"
 
-reqs_file="${reqs_file:-$DIR/requirements.txt}"            # optional (for your script)
+reqs_file="${reqs_file:-./requirements.txt}"            # optional (for your script)
 
 # Size-slimming toggles used by the recipe
 KEEP_LOCALES="${KEEP_LOCALES:-en}"
@@ -37,7 +40,7 @@ PY_DROP_SOURCES="${PY_DROP_SOURCES:-0}"
 DEBOS_VERBOSE=0
 DRY_RUN=0
 
-OVERLAY="${OVERLAY:-$DIR/overlay}"
+OVERLAY="${OVERLAY:-./overlay}"
 
 usage() {
   cat <<EOF
@@ -57,6 +60,9 @@ Console & user:
   --username NAME           (default: $USERNAME)
   --password PASS           (default: $PASSWORD)
   --sudo-nopass 0|1         (default: $SUDO_NOPASS)
+  --hostname NAME          (default: $HOSTNAME)
+  --login-as MODE          root|user (default: $LOGIN_AS)
+  --overlay-dest PATH      (default: $OVERLAY_DEST)
 
 Python:
   --py-enable 0|1           (default: $PY_ENABLE)
@@ -99,6 +105,9 @@ while [[ $# -gt 0 ]]; do
     --username) USERNAME="$2"; shift 2;;
     --password) PASSWORD="$2"; shift 2;;
     --sudo-nopass) SUDO_NOPASS="$2"; shift 2;;
+    --hostname) HOSTNAME="$2"; shift 2;;
+    --login-as) LOGIN_AS="$2"; shift 2;;
+    --overlay-dest) OVERLAY_DEST="$2"; shift 2;;
 
     --py-enable) PY_ENABLE="$2"; shift 2;;
     --py-mode) PY_MODE="$2"; shift 2;;
@@ -147,13 +156,16 @@ case "$FORMAT" in
   tar)      CMD="$CMD -t tarname:$TARNAME" ;;
 esac
 
+CMD="$CMD -t format:$FORMAT"  
+
 # Python toggles (match your recipe’s variables)
 CMD="$CMD -t py_enable:$PY_ENABLE -t py_mode:$PY_MODE -t py_venv_path:$PY_VENV_PATH"
 CMD="$CMD -t keep_locales:$KEEP_LOCALES -t py_prune_tests:$PY_PRUNE_TESTS -t py_compile_pyc:$PY_COMPILE_PYC -t py_drop_sources:$PY_DROP_SOURCES"
-
+CMD="$CMD -t hostname:$HOSTNAME -t overlay_dest:$OVERLAY_DEST"   
 # Env vars for your helper script(s)
-CMD="$CMD -e CONSOLE:$CONSOLE -e USERNAME:$USERNAME -e PASSWORD:$PASSWORD -e SUDO_NOPASS:$SUDO_NOPASS"
-CMD="$CMD -t username:$USERNAME"
+CMD="$CMD -e CONSOLE:$CONSOLE -e USERNAME:$USERNAME -e PASSWORD:$PASSWORD -e SUDO_NOPASS:$SUDO_NOPASS -e LOGIN_AS:$LOGIN_AS"   
+
+#CMD="$CMD -t username:$USERNAME"
 [[ -n "${reqs_file}" ]] && CMD="$CMD -t reqs_file:$reqs_file"
 
 if [[ -d "$OVERLAY" ]]; then

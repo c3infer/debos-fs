@@ -16,7 +16,7 @@ Minimal cpio.gz, no Python:
 ./build.sh --format cpio.gz --py-enable 0
 ```
 
-ext4 image, Python enabled from a file:
+ext4 image, Python enabled with installed packages specified in `requirements.txt`:
 ```
 ./build.sh --format ext4 --py-enable 1 --reqs-file ./requirements.txt
 ```

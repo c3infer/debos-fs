@@ -11,8 +11,12 @@
 {{- $py_drop_sources := or .py_drop_sources "0" -}}      
 {{- $reqs_file       := or .reqs_file "requirements.txt" -}}
 {{- $artifactdir := or .artifactdir "/tmp/artifacts" -}}
-{{- $overlay_dir := or .overlay_dir "" -}}
+{{- $overlay_dir      := or .overlay_dir "" -}}
 {{- $username := or .username "" -}}
+{{- $hostname       := or .hostname "vm" -}}
+{{- $overlay_dest   := or .overlay_dest "/root" -}}
+{{- $device_mount := or .device_mount "sh" -}} 
+{{- $mount_point := or .mount_point "/root/shared_with_VM" -}}
 
 
 architecture: arm64
@@ -26,20 +30,61 @@ actions:
 
   - action: apt
     description: Install systemd
-    packages: [systemd, systemd-sysv, udev]
-
-  - action: apt
-    description: Add a few basics
-    packages: [ca-certificates, sudo]
+    packages: [systemd, systemd-sysv, udev, sudo]
+    
+  - action: run
+    chroot: true
+    description: Disable APT recommends/suggests
+    command: |
+      cat >/etc/apt/apt.conf.d/01norecommends <<'EOF'
+      APT::Install-Recommends "false";
+      APT::Install-Suggests "false";
+      EOF
+# Tell apt not to keep downloaded .debs and not to fetch translations
+  - action: run
+    chroot: true
+    description: Slim apt caches by default
+    command: |
+      cat >/etc/apt/apt.conf.d/02slim <<'EOF'
+      APT::Keep-Downloaded-Packages "false";
+      Acquire::Languages "none";
+      EOF
+  
+  - action: run
+    description: Set hostname and hosts
+    chroot: true
+    command: |
+      set -e
+      echo "{{ $hostname }}" > /etc/hostname
+      sed -i "s/^\(127\.0\.1\.1[[:space:]]*\).*/\1{{ $hostname }}/" /etc/hosts || \
+      printf '\n127.0.1.1\t{{ $hostname }}\n' >> /etc/hosts
 
   - action: apt
     description: Small runtime libs often used by scientific wheels
-    packages: [libgfortran5, libstdc++6, ca-certificates]
+    packages: [libgomp1, libstdc++6, libgcc-s1]
+
+  {{- if and $device_mount $mount_point }}
+  - action: run
+    chroot: true
+    description: Mount 9p share via fstab
+    command: |
+      set -e
+      install -d -m 0755 "{{ $mount_point }}"
+
+      awk -v dev="{{ $device_mount }}" -v mp="{{ $mount_point }}" '
+      !($1==dev && $2==mp && $3=="9p") { print }
+      ' /etc/fstab > /etc/fstab.new || true
+      mv /etc/fstab.new /etc/fstab
+
+      line="{{ $device_mount }} {{ $mount_point }} 9p trans=virtio,version=9p2000.L,msize=262144 0 0"
+      grep -qF -- "$line" /etc/fstab || printf '%s\n' "$line" >> /etc/fstab
+  {{- end }}
 
   - action: run
     description: Enable serial autologin
     chroot: true
     script: ./setup-user.sh
+
 
   {{- if eq $py_enable "1" }}
   - action: apt
@@ -117,12 +162,43 @@ actions:
       proc-sys-fs-binfmt_misc.mount \
       proc-sys-fs-binfmt_misc.automount || true
 
+  - action: run
+    chroot: true
+    description: Make journald volatile and clean apt caches
+    command: |
+      sed -i 's/^#\?Storage=.*/Storage=volatile/' /etc/systemd/journald.conf || true
+      rm -rf /var/log/journal/* /var/log/* 2>/dev/null || true
+      rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
+  
+  {{- $keep_locales := or .keep_locales "en" -}}
+  - action: run
+    chroot: true
+    description: Prune docs/man/extra locales that are already installed
+    command: |
+      set -e
+      # docs & man
+      find /usr/share/doc -mindepth 1 -type d -exec rm -rf {} + || true
+      find /usr/share/doc -type f ! -name copyright -delete || true
+      rm -rf /usr/share/man/* /usr/share/info/*
 
+      # i18n catalogs under /usr/share/locale (keep selected prefix)
+      find /usr/share/locale -mindepth 1 -maxdepth 1 \
+        ! -name '{{ $keep_locales }}*' -exec rm -rf {} + || true
+
+  - action: run
+    chroot: true
+    description: Final prune of apt caches and logs
+    command: |
+      rm -rf /var/lib/apt/lists/* \
+             /var/cache/apt/archives/*.deb \
+             /var/cache/apt/*.bin \
+             /var/log/* /var/log/journal/* || true
+  
   {{- if $overlay_dir }}
   - action: overlay
     description: Overlay files into the target rootfs
     source: {{ $overlay_dir }}
-    destination: /home/{{ $username }}/
+    destination: {{ $overlay_dest }}
   {{- end }}
        
 
@@ -152,7 +228,7 @@ actions:
       set -e
       cd "${ROOTDIR}"
       install -d "${ARTIFACTDIR}"
-      find . -print0 | cpio --null -ov --format=newc > "${ARTIFACTDIR}/{{ $cpioname }}"
+      find . -print0 | cpio --null -o --format=newc > "${ARTIFACTDIR}/{{ $cpioname }}"
 
   {{- else if eq $format "cpio.gz" }}
   - action: run
@@ -161,7 +237,7 @@ actions:
       set -e
       cd "${ROOTDIR}"
       install -d "${ARTIFACTDIR}"
-      find . -print0 | cpio --null -ov --format=newc | gzip -9 > "${ARTIFACTDIR}/{{ $cpioname_gz }}"
+      find . -print0 | cpio --null -o --format=newc | gzip -9 > "${ARTIFACTDIR}/{{ $cpioname_gz }}"
 
   {{- else }}
   - action: pack
