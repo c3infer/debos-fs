@@ -42,6 +42,9 @@ DRY_RUN=0
 
 OVERLAY="${OVERLAY:-./overlay}"
 
+DEVICE_MOUNT="${DEVICE_MOUNT:-sh}"
+MOUNT_POINT="${MOUNT_POINT:--/root/shared_with_VM}"
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [options]
@@ -54,6 +57,9 @@ General:
   --dry-run                 print the command and exit
   --overlay DIR             overlay directory to merge into the rootfs (default: $OVERLAY)
                             (only in-tree addresses work. give relative path)
+  --overlay-dest PATH      (default: $OVERLAY_DEST)
+  --device-mount NAME       (default: $DEVICE_MOUNT) The device name to mount inside the VM. Does not work with .ext4 images.
+  --mount-point PATH        (default: $MOUNT_POINT) The mount point inside the VM. Does not work with .ext4 images.
 
 Console & user:
   --console TTY             (default: $CONSOLE)
@@ -62,7 +68,7 @@ Console & user:
   --sudo-nopass 0|1         (default: $SUDO_NOPASS)
   --hostname NAME          (default: $HOSTNAME)
   --login-as MODE          root|user (default: $LOGIN_AS)
-  --overlay-dest PATH      (default: $OVERLAY_DEST)
+
 
 Python:
   --py-enable 0|1           (default: $PY_ENABLE)
@@ -175,11 +181,15 @@ fi
 # Recipe
 CMD="$CMD $RECIPE"
 
+# Device mount and mount point (only for non-ext4 images)
+if [[ $FORMAT != "ext4" ]]; then
+  CMD="$CMD -t device_mount:$DEVICE_MOUNT -t mount_point:$MOUNT_POINT"
+fi
+
 echo "+ $CMD"
 if [[ $DRY_RUN -eq 1 ]]; then
   exit 0
 fi
-
 
 # Run it
 eval "$CMD"

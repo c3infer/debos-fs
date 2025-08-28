@@ -15,8 +15,9 @@
 {{- $username := or .username "" -}}
 {{- $hostname       := or .hostname "vm" -}}
 {{- $overlay_dest   := or .overlay_dest "/root" -}}
-{{- $device_mount := or .device_mount "sh" -}} 
-{{- $mount_point := or .mount_point "/root/shared_with_VM" -}}
+{{- $device_mount := or .device_mount "" -}} 
+{{- $mount_point := or .mount_point "" -}}
+
 
 
 architecture: arm64
@@ -49,7 +50,7 @@ actions:
       APT::Keep-Downloaded-Packages "false";
       Acquire::Languages "none";
       EOF
-  
+
   - action: run
     description: Set hostname and hosts
     chroot: true
@@ -79,6 +80,7 @@ actions:
       line="{{ $device_mount }} {{ $mount_point }} 9p trans=virtio,version=9p2000.L,msize=262144 0 0"
       grep -qF -- "$line" /etc/fstab || printf '%s\n' "$line" >> /etc/fstab
   {{- end }}
+
 
   - action: run
     description: Enable serial autologin
@@ -183,7 +185,7 @@ actions:
 
       # i18n catalogs under /usr/share/locale (keep selected prefix)
       find /usr/share/locale -mindepth 1 -maxdepth 1 \
-        ! -name '{{ $keep_locales }}*' -exec rm -rf {} + || true
+      ! -name '{{ $keep_locales }}*' -exec rm -rf {} + || true
 
   - action: run
     chroot: true
