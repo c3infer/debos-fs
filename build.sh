@@ -43,7 +43,7 @@ DRY_RUN=0
 OVERLAY="${OVERLAY:-./overlay}"
 
 DEVICE_MOUNT="${DEVICE_MOUNT:-sh}"
-MOUNT_POINT="${MOUNT_POINT:--/root/shared_with_VM}"
+MOUNT_POINT="${MOUNT_POINT:-/root/shared_with_VM}"
 
 usage() {
   cat <<EOF
