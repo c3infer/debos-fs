@@ -32,7 +32,17 @@ actions:
   - action: apt
     description: Install systemd
     packages: [systemd, systemd-sysv, udev, sudo]
-    
+  
+# We must make it optional later
+  - action: apt
+    description: Add a couple of libraries for testing scientific Python wheels
+    packages: [libgl1, ffmpeg]
+      #- libglib2.0-0
+     # - libsm6
+      #- libxext6
+     # - libxrender1
+
+  
   - action: run
     chroot: true
     description: Disable APT recommends/suggests
