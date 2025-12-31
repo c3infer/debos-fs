@@ -19,9 +19,14 @@ ext4 image, Python enabled with installed packages specified in `requirements.tx
 ./build.sh --format ext4 --py-enable 1 --reqs-file ./requirements.txt
 ```
 
-overlaying file from a folder into the file system:
+Overlaying file from a folder into the file system:
 ```
-./build.sh --overlay ./overlay --overkay-dest /root
+./build.sh --overlay ./overlay --overlay-dest /root
+```
+
+You can specify a script to be running inside the file system, for example to install libraries with apt or set up systemd services. This script is executed after overlaying, therefore it can call scripts inside the `--overlay-dest` folder.
+```
+./build.sh --custom-script ./script.sh
 ```
 
 Just show what would run:

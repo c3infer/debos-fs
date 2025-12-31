@@ -17,6 +17,9 @@
 {{- $overlay_dest   := or .overlay_dest "/root" -}}
 {{- $device_mount := or .device_mount "" -}} 
 {{- $mount_point := or .mount_point "" -}}
+{{- $custom_script := or .custom_script "" -}}
+{{- $custom_script_dest := or .custom_script_dest "/usr/local/bin/custom-script.sh" -}}
+
 
 
 
@@ -34,9 +37,9 @@ actions:
     packages: [systemd, systemd-sysv, udev, sudo]
   
 # We must make it optional later
-  - action: apt
-    description: Add a couple of libraries for testing scientific Python wheels
-    packages: [libgl1, ffmpeg]
+ # - action: apt
+  #  description: Add a couple of libraries for testing scientific Python wheels
+   # packages: [libgl1, ffmpeg]
       #- libglib2.0-0
      # - libsm6
       #- libxext6
@@ -97,6 +100,27 @@ actions:
     chroot: true
     script: ./setup-user.sh
 
+  {{- if $overlay_dir }}
+  - action: overlay
+    description: Overlay files into the target rootfs
+    source: {{ $overlay_dir }}
+    destination: {{ $overlay_dest }}
+  {{- end }}
+
+  {{- if $custom_script }}
+  - action: overlay
+    description: Add custom script into rootfs
+    source: {{ $custom_script }}
+    destination: {{ $custom_script_dest }}
+
+  - action: run
+    chroot: true
+    description: Run custom script inside rootfs
+    command: |
+      set -eu
+      chmod 0755 "{{ $custom_script_dest }}"
+      /bin/sh "{{ $custom_script_dest }}"
+  {{- end }}   
 
   {{- if eq $py_enable "1" }}
   - action: apt
@@ -196,6 +220,7 @@ actions:
       # i18n catalogs under /usr/share/locale (keep selected prefix)
       find /usr/share/locale -mindepth 1 -maxdepth 1 \
       ! -name '{{ $keep_locales }}*' -exec rm -rf {} + || true
+  
 
   - action: run
     chroot: true
@@ -204,15 +229,7 @@ actions:
       rm -rf /var/lib/apt/lists/* \
              /var/cache/apt/archives/*.deb \
              /var/cache/apt/*.bin \
-             /var/log/* /var/log/journal/* || true
-  
-  {{- if $overlay_dir }}
-  - action: overlay
-    description: Overlay files into the target rootfs
-    source: {{ $overlay_dir }}
-    destination: {{ $overlay_dest }}
-  {{- end }}
-       
+             /var/log/* /var/log/journal/* || true  
 
   {{- if eq $format "ext4" }}
   - action: image-partition

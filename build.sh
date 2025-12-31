@@ -5,6 +5,7 @@ set -euo pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 RECIPE="${RECIPE:-$DIR/recipe.yaml}"
 ARTIFACTDIR="${ARTIFACTDIR:-$DIR/out}"
+DEFAULT_MEM="--memory=4Gb"
 
 FORMAT="${FORMAT:-cpio.gz}"           # cpio | cpio.gz | ext4 | tar
 IMGNAME="${IMGNAME:-rootfs.img}"
@@ -45,6 +46,9 @@ OVERLAY="${OVERLAY:-./overlay}"
 DEVICE_MOUNT="${DEVICE_MOUNT:-sh}"
 MOUNT_POINT="${MOUNT_POINT:-/root/shared_with_VM}"
 
+CUSTOM_SCRIPT="${CUSTOM_SCRIPT:-}"
+CUSTOM_SCRIPT_DEST="${CUSTOM_SCRIPT_DEST:-/usr/local/bin/custom-script.sh}"
+
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [options]
@@ -84,6 +88,9 @@ Format-specific:
   --cpioname-gz NAME        (cpio.gz)(default: $CPIONAME_GZ)
   --tarname NAME            (tar)    (default: $TARNAME)
 
+Custom script:
+  --custom-script PATH       run one script inside the rootfs during build (only realative in-tree addresses work)
+  --custom-script-dest PATH  destination path inside the image (default: $CUSTOM_SCRIPT_DEST)
 Slimming:
   --keep-locales CODE       (default: $KEEP_LOCALES)
   --py-prune-tests 0|1      (default: $PY_PRUNE_TESTS)
@@ -131,6 +138,8 @@ while [[ $# -gt 0 ]]; do
     --py-prune-tests) PY_PRUNE_TESTS="$2"; shift 2;;
     --py-compile-pyc) PY_COMPILE_PYC="$2"; shift 2;;
     --py-drop-sources) PY_DROP_SOURCES="$2"; shift 2;;
+    --custom-script) CUSTOM_SCRIPT="$2"; shift 2;;
+    --custom-script-dest) CUSTOM_SCRIPT_DEST="$2"; shift 2;;
 
     --verbose) DEBOS_VERBOSE=1; shift;;
     --dry-run) DRY_RUN=1; shift;;
@@ -181,11 +190,22 @@ fi
 # Recipe
 CMD="$CMD $RECIPE"
 
+# Add memory size
+CMD="$CMD $DEFAULT_MEM"
+
 # Device mount and mount point (only for non-ext4 images)
 if [[ $FORMAT != "ext4" ]]; then
   CMD="$CMD -t device_mount:$DEVICE_MOUNT -t mount_point:$MOUNT_POINT"
 fi
 
+if [[ -n "${CUSTOM_SCRIPT}" ]]; then
+  if [[ ! -f "${CUSTOM_SCRIPT}" ]]; then
+    echo "Custom script not found: ${CUSTOM_SCRIPT}"
+    exit 2
+  fi
+
+  CMD="$CMD -t custom_script:${CUSTOM_SCRIPT} -t custom_script_dest:${CUSTOM_SCRIPT_DEST}"
+fi
 echo "+ $CMD"
 if [[ $DRY_RUN -eq 1 ]]; then
   exit 0
