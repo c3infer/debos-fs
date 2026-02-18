@@ -1,0 +1,9 @@
+{
+  "Mem1": {
+    "size": 0x40000,
+    "type": "PROTECTED",
+    "mappings": {
+      "ANY": { "gpa": 0x18000000000, "prot": "RW", "any-count": 1 }
+    }
+  }
+}

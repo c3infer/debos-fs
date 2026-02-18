@@ -14,6 +14,8 @@ BACKUP=1
 DRYRUN=0
 LIST=0
 VERIFY_PATH="${VERIFY_PATH:-}"  # optional path to check inside the artifact after applying
+PRE_SCRIPT="${PRE_SCRIPT:-}"    # optional host script to run before apply
+POST_SCRIPT="${POST_SCRIPT:-}"  # optional host script to run after apply
 
 # ---------- Helpers ----------
 log()  { printf '%s\n' "$*" >&2; }
@@ -34,6 +36,8 @@ Options:
   --artifact PATH    Artifact to modify (.cpio|.cpio.gz|.img|.tar.gz)
   --dest PATH        Target path inside the filesystem (default: /root)
   --verify PATH      After applying, check that PATH exists inside the artifact
+  --pre-script PATH  Run host script before applying overlay
+  --post-script PATH Run host script after applying overlay
   --no-backup        Do not create ARTIFACT.bak
   --dry-run          Show actions without modifying anything
   --list             List detected artifacts in --out and exit
@@ -58,6 +62,8 @@ while [[ $# -gt 0 ]]; do
     --artifact) ARTIFACT="$2"; shift 2;;
     --dest) DEST="$2"; shift 2;;
     --verify) VERIFY_PATH="$2"; shift 2;;
+    --pre-script) PRE_SCRIPT="$2"; shift 2;;
+    --post-script) POST_SCRIPT="$2"; shift 2;;
     --no-backup) BACKUP=0; shift;;
     --dry-run) DRYRUN=1; shift;;
     --list) LIST=1; shift;;
@@ -69,6 +75,8 @@ done
 # ---------- Sanity ----------
 [[ -d "$OVERLAY" ]] || die "overlay dir not found: $OVERLAY"
 [[ -d "$OUTDIR"  ]] || die "out dir not found: $OUTDIR"
+[[ -z "$PRE_SCRIPT" || -f "$PRE_SCRIPT" ]] || die "pre-script not found: $PRE_SCRIPT"
+[[ -z "$POST_SCRIPT" || -f "$POST_SCRIPT" ]] || die "post-script not found: $POST_SCRIPT"
 
 # Normalize DEST (leading slash, strip trailing unless root)
 if [[ -z "$DEST" ]]; then DEST="/"; fi
@@ -107,6 +115,8 @@ log "[i] Overlay  : $OVERLAY"
 log "[i] Artifact : $ARTIFACT"
 log "[i] Dest     : $DEST"
 [[ -n "$VERIFY_PATH" ]] && log "[i] Verify   : $VERIFY_PATH"
+[[ -n "$PRE_SCRIPT" ]] && log "[i] Pre-script : $PRE_SCRIPT"
+[[ -n "$POST_SCRIPT" ]] && log "[i] Post-script: $POST_SCRIPT"
 [[ $BACKUP -eq 1 ]] && log "[i] Backup   : enabled (will create ${ARTIFACT}.bak)"
 [[ $DRYRUN  -eq 1 ]] && log "[i] Dry-run  : enabled"
 
@@ -242,16 +252,27 @@ overlay_into_ext4_img() {
   local img="$1"
   log "[i] Mount image…"
   mnt="$tmpdir/mnt"; mkdir -p "$mnt"
+  local part_offset=""
 
   if [[ $DRYRUN -eq 1 ]]; then
-    log "[dry] sudo mount -o loop \"$img\" \"$mnt\" || (loopdev=\$(sudo losetup --find --show --partscan \"$img\"); sudo mount \${loopdev}p1 \"$mnt\")"
+    log "[dry] sudo mount -o loop \"$img\" \"$mnt\" || (loopdev=\$(sudo losetup --find --show --partscan \"$img\"); sudo mount \${loopdev}p1 \"$mnt\" || sudo mount -o loop,offset=<p1_offset> \"$img\" \"$mnt\")"
   else
     if sudo mount -o loop "$img" "$mnt" 2>/dev/null; then :
     else
       loopdev="$(sudo losetup --find --show --partscan "$img")"
       part="${loopdev}p1"
-      [[ -b "$part" ]] || die "No partition node (tried $part)"
-      sudo mount "$part" "$mnt"
+      if [[ -b "$part" ]]; then
+        sudo mount "$part" "$mnt"
+      else
+        log "[i] No partition node (tried $part); trying offset mount"
+        part_offset="$(fdisk -l "$img" 2>/dev/null | awk -v i="$img" '$1==(i "1"){print $2; exit}')"
+        [[ -n "$part_offset" ]] || die "No partition node (tried $part) and could not detect partition offset"
+        part_offset=$((part_offset * 512))
+        # Avoid "overlapping loop device exists" by detaching the temporary loop first.
+        sudo losetup -d "$loopdev" >/dev/null 2>&1 || true
+        unset loopdev
+        sudo mount -o loop,offset="$part_offset" "$img" "$mnt" || die "Could not mount with partition offset $part_offset"
+      fi
     fi
   fi
 
@@ -332,7 +353,16 @@ post_verify() {
       if sudo mount -o loop "$ARTIFACT" "$mnt" 2>/dev/null; then :
       else
         loopdev="$(sudo losetup --find --show --partscan "$ARTIFACT")"
-        sudo mount "${loopdev}p1" "$mnt"
+        if [[ -b "${loopdev}p1" ]]; then
+          sudo mount "${loopdev}p1" "$mnt"
+        else
+          part_offset="$(fdisk -l "$ARTIFACT" 2>/dev/null | awk -v i="$ARTIFACT" '$1==(i "1"){print $2; exit}')"
+          [[ -n "$part_offset" ]] || die "Verify mount failed: no ${loopdev}p1 and no partition offset found"
+          part_offset=$((part_offset * 512))
+          sudo losetup -d "$loopdev" >/dev/null 2>&1 || true
+          unset loopdev
+          sudo mount -o loop,offset="$part_offset" "$ARTIFACT" "$mnt"
+        fi
       fi
       if sudo test -e "$mnt$vp"; then
         log "[✓] Found: $vp in $(basename "$ARTIFACT")"
@@ -355,6 +385,15 @@ post_verify() {
 
 # ---------- Run ----------
 do_backup
+if [[ -n "$PRE_SCRIPT" ]]; then
+  log "[i] Running pre-script: $PRE_SCRIPT"
+  if [[ $DRYRUN -eq 1 ]]; then
+    log "[dry] OVERLAY='$OVERLAY' OUTDIR='$OUTDIR' ARTIFACT='$ARTIFACT' DEST='$DEST' \"$PRE_SCRIPT\""
+  else
+    OVERLAY="$OVERLAY" OUTDIR="$OUTDIR" ARTIFACT="$ARTIFACT" DEST="$DEST" "$PRE_SCRIPT"
+  fi
+fi
+
 case "$ARTIFACT" in
   *.cpio|*.cpio.gz) repack_cpio "$ARTIFACT" ;;
   *.img)            overlay_into_ext4_img "$ARTIFACT" ;;
@@ -363,5 +402,14 @@ case "$ARTIFACT" in
 esac
 
 post_verify
+
+if [[ -n "$POST_SCRIPT" ]]; then
+  log "[i] Running post-script: $POST_SCRIPT"
+  if [[ $DRYRUN -eq 1 ]]; then
+    log "[dry] OVERLAY='$OVERLAY' OUTDIR='$OUTDIR' ARTIFACT='$ARTIFACT' DEST='$DEST' \"$POST_SCRIPT\""
+  else
+    OVERLAY="$OVERLAY" OUTDIR="$OUTDIR" ARTIFACT="$ARTIFACT" DEST="$DEST" "$POST_SCRIPT"
+  fi
+fi
 
 log "[done] Overlay applied."
