@@ -6,7 +6,17 @@ echo "Installing optional scientific wheel dependencies..."
 # Install python-required libraries
 
 apt-get update
-apt-get install -y --no-install-recommends libgl1 ffmpeg build-essential file
+apt-get install -y --no-install-recommends \
+  libgl1 \
+  ffmpeg \
+  build-essential \
+  file \
+  python3-dev \
+  cmake \
+  ninja-build \
+  pkg-config \
+  git \
+  ca-certificates
 
 # Build rw_ivshmem from overlay source into /root/rw_ivshmem
 if [ -f /root/rw_ivshmem.c ]; then

@@ -1,0 +1,14 @@
+{
+  "Self": "VM2",
+  "VM1": { "hash": 0x1, "is-gateway": true, "strict": false },
+  "VM2": { "hash": 0x2, "is-gateway": true, "strict": false },
+
+  "Mem1": {
+    "size": 0x2000,
+    "type": "PROTECTED",
+    "mappings": {
+      "VM1": { "gpa": 0x18000000000, "prot": "RW" },
+      "VM2": { "gpa": 0x18000000000, "prot": "RW" }
+    }
+  }
+}

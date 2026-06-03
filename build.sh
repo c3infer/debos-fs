@@ -5,7 +5,7 @@ set -euo pipefail
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 RECIPE="${RECIPE:-$DIR/recipe.yaml}"
 ARTIFACTDIR="${ARTIFACTDIR:-$DIR/out}"
-DEFAULT_MEM="--memory=4Gb"
+DEFAULT_MEM="${DEFAULT_MEM:---memory=4Gb}"
 
 FORMAT="${FORMAT:-cpio.gz}"           # cpio | cpio.gz | ext4 | tar
 IMGNAME="${IMGNAME:-rootfs.img}"
@@ -59,6 +59,7 @@ General:
   --format FMT              cpio|cpio.gz|ext4|tar  (default: $FORMAT)
   --verbose                 pass -v to debos
   --dry-run                 print the command and exit
+  --memory SIZE             debos memory, e.g. 2Gb (default: ${DEFAULT_MEM#--memory=})
   --overlay DIR             overlay directory to merge into the rootfs (default: $OVERLAY)
                             (only in-tree addresses work. give relative path)
   --overlay-dest PATH      (default: $OVERLAY_DEST)
@@ -113,6 +114,7 @@ while [[ $# -gt 0 ]]; do
     --recipe) RECIPE="$2"; shift 2;;
     --artifactdir) ARTIFACTDIR="$2"; shift 2;;
     --format) FORMAT="$2"; shift 2;;
+    --memory) DEFAULT_MEM="--memory=$2"; shift 2;;
 
     --console) CONSOLE="$2"; shift 2;;
     --username) USERNAME="$2"; shift 2;;
@@ -121,6 +123,8 @@ while [[ $# -gt 0 ]]; do
     --hostname) HOSTNAME="$2"; shift 2;;
     --login-as) LOGIN_AS="$2"; shift 2;;
     --overlay-dest) OVERLAY_DEST="$2"; shift 2;;
+    --device-mount) DEVICE_MOUNT="$2"; shift 2;;
+    --mount-point) MOUNT_POINT="$2"; shift 2;;
 
     --py-enable) PY_ENABLE="$2"; shift 2;;
     --py-mode) PY_MODE="$2"; shift 2;;
@@ -195,7 +199,8 @@ CMD="$CMD $DEFAULT_MEM"
 
 # Device mount and mount point (only for non-ext4 images)
 if [[ $FORMAT != "ext4" ]]; then
-  CMD="$CMD -t device_mount:$DEVICE_MOUNT -t mount_point:$MOUNT_POINT"
+  [[ -n "$DEVICE_MOUNT" ]] && CMD="$CMD -t device_mount:$DEVICE_MOUNT"
+  [[ -n "$MOUNT_POINT" ]] && CMD="$CMD -t mount_point:$MOUNT_POINT"
 fi
 
 if [[ -n "${CUSTOM_SCRIPT}" ]]; then

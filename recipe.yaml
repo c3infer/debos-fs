@@ -146,12 +146,15 @@ actions:
   - action: run
     description: Install Python packages system-wide
     chroot: true
-    environment: { PIP_BREAK_SYSTEM_PACKAGES: "1" }
+    environment: { PIP_BREAK_SYSTEM_PACKAGES: "1", PIP_NO_CACHE_DIR: "1" }
     command: |
       set -e
       test -f /root/py-reqs.txt || { echo "Missing /root/py-reqs.txt"; ls -l /root; exit 1; }
-      python3 -m pip install --break-system-packages --upgrade pip
-      python3 -m pip install --break-system-packages -r /root/py-reqs.txt
+      mkdir -p /root/pip-tmp
+      export TMPDIR=/root/pip-tmp
+      python3 -m pip install --break-system-packages --no-cache-dir --upgrade pip
+      python3 -m pip install --break-system-packages --no-cache-dir -r /root/py-reqs.txt
+      rm -rf /root/.cache/pip /root/pip-tmp /tmp/pip-* /tmp/tmp*
 
   {{- if eq $py_compile_pyc "1" }}
   - action: run
@@ -230,6 +233,14 @@ actions:
              /var/cache/apt/archives/*.deb \
              /var/cache/apt/*.bin \
              /var/log/* /var/log/journal/* || true  
+
+  {{- if or (eq $format "cpio") (eq $format "cpio.gz") }}
+  - action: run
+    chroot: true
+    description: Ensure /init exists for initramfs boot
+    command: |
+      [ -e /init ] || ln -s /sbin/init /init
+  {{- end }}
 
   {{- if eq $format "ext4" }}
   - action: image-partition
